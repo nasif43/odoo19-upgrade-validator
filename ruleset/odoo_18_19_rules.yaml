@@ -1,0 +1,784 @@
+# ruleset/odoo_18_19_rules.yaml
+#
+# Odoo 18 -> 19 breaking-change ruleset.
+#
+# Evidence tiers used in this file:
+#
+#   [OFFICIAL]    Confirmed directly in odoo.com/documentation/19.0 or a
+#                 merged github.com/odoo/odoo PR link.
+#
+#   [COMMUNITY]   Not in official docs but confirmed by:
+#                   * Solved GitHub issues / merged PRs in OCA or odoo repos
+#                   * Odoo forum threads with accepted/solved answers
+#                   * Reproducible reports on reddit, dev.to, medium (2025)
+#                   * Consistent across 3+ independent sources
+#                 These are judged reliable for 127-module migration purposes
+#                 but lack a primary-source URL.
+#
+#   [ACKNOWLEDGED-UNVERIFIED]
+#                 Raised / discussed in the community but either disputed,
+#                 incomplete, or only one source.  Listed in the
+#                 ACKNOWLEDGED_UNVERIFIED section at the bottom — NOT as rules.
+
+schema_version: 2
+target_migration: "18.0->19.0"
+sources:
+  - "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html"
+  - "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm.html"
+  - "https://www.odoo.com/documentation/19.0/developer/reference/user_interface/view_architectures.html"
+  - "https://www.odoo.com/documentation/19.0/developer/reference/frontend/assets.html"
+  - "https://github.com/odoo/odoo/pull/217708  (odoo.osv deprecation)"
+  - "https://github.com/odoo/odoo/pull/193636  (record._cr/_context/_uid)"
+  - "https://github.com/odoo/odoo/pull/183636  (json->jsonrpc controller type)"
+  - "https://github.com/odoo/odoo/pull/179148  (check_access / _filtered_access)"
+  - "https://github.com/odoo/odoo/pull/163300  (read_group deprecated)"
+  - "https://github.com/odoo/odoo/pull/122085  (name_get deprecated)"
+  - "Community: reddit.com/r/Odoo, dev.to, cybrosys.com, wcblog.in, winotto.com (2025 posts)"
+generated: "2026-08-08"
+reviewed_by: "AI-research-pass-1 (no human sign-off yet)"
+ruleset_version: "1.0.0"   # semver; learning engine bumps patch on each confirmed update
+
+rules:
+
+  # ==========================================================================
+  # CATEGORY: manifest
+  # ==========================================================================
+
+  - id: MANIFEST_VERSION_STRING
+    category: manifest
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      The 'version' key in __manifest__.py must start with '19.0' for Odoo 19
+      modules.  A module still carrying '18.0.x.y.z' will install on Odoo 19
+      but will be rejected by upgrade tooling and may cause subtle
+      dependency-ordering bugs.
+    check_type: regex
+    pattern: "^\\s*['\"]version['\"]\\s*:\\s*['\"](?!19\\.0)[^'\"]*['\"]"
+    applies_to: "**/__manifest__.py"
+    fix_hint: >
+      Change the version value to '19.0.x.y.z' (e.g. '19.0.1.0.0').
+      Convention: the first two segments are the Odoo major version (19.0)
+      followed by three application-level integers.
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/module.html"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: MANIFEST_LICENSE_MISSING
+    category: manifest
+    severity: warning
+    evidence: OFFICIAL
+    description: >
+      The 'license' key is enforced in Odoo 19 manifests.  Omitting it causes
+      a log warning on startup and may fail stricter validation.
+    check_type: callable
+    ast_pattern: "manifest_dict_missing_key('license')"
+    applies_to: "**/__manifest__.py"
+    fix_hint: >
+      Add a 'license' key, e.g.:
+        'license': 'LGPL-3',
+      Valid values: 'LGPL-3', 'GPL-3', 'AGPL-3', 'OPL-1', 'OEEL-1'.
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/module.html"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: MANIFEST_OPENERP_FILE
+    category: manifest
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      Modules that still use the legacy '__openerp__.py' manifest file cannot
+      be loaded by Odoo 19.  The file must be renamed to '__manifest__.py'.
+    check_type: regex
+    pattern: ".*"
+    applies_to: "**/__openerp__.py"
+    fix_hint: >
+      Rename __openerp__.py to __manifest__.py and verify the dict content
+      conforms to the current manifest schema.
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/module.html"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: python_api  --  ORM changes (OFFICIAL evidence)
+  # ==========================================================================
+
+  - id: ORM_OSV_IMPORT
+    category: python_api
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      The 'odoo.osv' module is officially deprecated in Odoo 19 (PR #217708).
+      'from odoo.osv import expression' or
+      'from odoo.osv.expression import AND, OR, NOT' produce
+      DeprecationWarnings and are scheduled for removal.
+      Replacement: odoo.fields.Domain class.
+    check_type: ast
+    ast_pattern: "import_from_module starts_with 'odoo.osv'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace:
+        from odoo.osv import expression
+        from odoo.osv.expression import AND, OR, NOT
+      with:
+        from odoo.fields import Domain
+        combined = Domain(domain1) & Domain(domain2)  # AND
+        combined = Domain(domain1) | Domain(domain2)  # OR
+        negated  = ~Domain(domain1)                   # NOT
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (19.0 section, PR #217708)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_OPENERP_IMPORT
+    category: python_api
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      The 'openerp' Python namespace no longer exists in Odoo 19.
+      Any 'from openerp import ...' or 'import openerp' will raise ImportError
+      at module load time.
+    check_type: ast
+    ast_pattern: "import_from_module starts_with 'openerp' OR import_module == 'openerp'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace all 'from openerp import ...' with 'from odoo import ...'
+      and 'import openerp' with 'import odoo'.
+    source: "https://www.odoo.com/documentation/19.0/ (namespace retired; confirmed across all Odoo 19 migration guides)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_CHECK_ACCESS_RIGHTS_DEPRECATED
+    category: python_api
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      'check_access_rights()' and 'check_access_rule()' are superseded in
+      Odoo 18.0 (PR #179148) by the unified 'check_access()', 'has_access()',
+      and '_filtered_access()' API.  Both old methods raise DeprecationWarning
+      in Odoo 19 and may be removed in a patch release.
+    check_type: ast
+    ast_pattern: "method_call_name in ('check_access_rights', 'check_access_rule')"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace:
+        self.check_access_rights('read')  ->  self.check_access('read')
+        self.check_access_rule('write')   ->  self.check_access('write')
+      Boolean check (no exception raised):
+        self.has_access('read')           # returns True/False
+      Filtered recordset:
+        valid = self._filtered_access('read')
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (18.0 section, PR #179148)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_FILTER_ACCESS_RULE_DEPRECATED
+    category: python_api
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      '_filter_access_rule()' and '_filter_access_rule_python()' are replaced
+      by '_filtered_access()' (PR #179148).  Calling the old methods raises
+      AttributeError on Odoo 19.
+    check_type: ast
+    ast_pattern: "method_call_name in ('_filter_access_rule', '_filter_access_rule_python')"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace '_filter_access_rule(op)' / '_filter_access_rule_python(op)'
+      with '_filtered_access(op)'.
+      The new method checks both access rights and record rules in one call.
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (18.0 section, PR #179148)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_NAME_GET_DEPRECATED
+    category: python_api
+    severity: warning
+    evidence: OFFICIAL
+    description: >
+      'name_get()' was officially deprecated in Odoo 16.4 (PR #122085) and is
+      not called by the web client since Odoo 17.  Modules overriding
+      'name_get' produce wrong display labels in Odoo 19 silently.
+      Replacement: override '_compute_display_name'.
+    check_type: ast
+    ast_pattern: "function_def_name == 'name_get'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace name_get() with _compute_display_name():
+        @api.depends('name', 'partner_id')  # add all contributing fields
+        def _compute_display_name(self):
+            for rec in self:
+                rec.display_name = f"{rec.name} ({rec.partner_id.name})"
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (16.4 section, PR #122085)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_READ_GROUP_DEPRECATED
+    category: python_api
+    severity: warning
+    evidence: OFFICIAL
+    description: >
+      'read_group()' was officially deprecated in Odoo 18.2 (PR #163300) in
+      favour of '_read_group()' for backend use and 'formatted_read_group()'
+      as the public API.  Calling 'read_group()' in Odoo 19 triggers
+      DeprecationWarning.
+    check_type: ast
+    ast_pattern: "method_call_name == 'read_group'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      For backend aggregation:
+        self._read_group(domain, groupby=['field'], aggregates=['amt:sum'])
+      For public/RPC-exposed calls:
+        self.formatted_read_group(domain, groupby=['field'], aggregates=['amt:sum'])
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (18.2 section, PR #163300)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_RECORD_ENV_SHORTCUTS_DEPRECATED
+    category: python_api
+    severity: warning
+    evidence: OFFICIAL
+    description: >
+      'self._cr', 'self._context', 'self._uid' are officially deprecated in
+      Odoo 19 (PR #193636) and will be removed in a future release.
+      Use 'self.env.cr', 'self.env.context', 'self.env.uid'.
+    check_type: regex
+    pattern: "self\\.((_cr)|(_context)|(_uid))\\b"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace:
+        self._cr       ->  self.env.cr
+        self._context  ->  self.env.context
+        self._uid      ->  self.env.uid
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (19.0 section, PR #193636)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: python_api  --  ORM changes (COMMUNITY evidence)
+  # ==========================================================================
+
+  - id: ORM_API_RETURNS_REMOVED
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      The '@api.returns' decorator has been removed in Odoo 19 as part of the
+      API cleanup.  Methods decorated with '@api.returns' will raise
+      AttributeError or be ignored at module load.  Simply removing the
+      decorator is the fix in most cases.
+      (Confirmed: reddit.com/r/Odoo 2025, cybrosys.com migration guide 2025,
+       multiple independent forum posts.)
+    check_type: ast
+    ast_pattern: "decorator_name == 'api.returns'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Remove the @api.returns decorator entirely.  The ORM handles return
+      values without it.  If the decorator was enforcing a specific record
+      type, add an explicit assertion or isinstance check instead.
+    source: "Community: reddit.com/r/Odoo (solved threads, 2025), cybrosys.com Odoo 19 migration guide"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: ORM_SQL_CONSTRAINTS_REMOVED
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      '_sql_constraints' list-of-tuples is silently ignored in Odoo 19.
+      Constraints defined this way are NOT created in the database, leaving
+      data integrity at risk with no install-time error.
+      Replacement: models.Constraint class attributes.
+      (Confirmed: odoo.com forum answer, cybrosys.com 2025, codeerts.com 2025,
+       multiple independent reports.)
+    check_type: ast
+    ast_pattern: "attribute_assignment_name == '_sql_constraints'"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace the _sql_constraints list with individual models.Constraint
+      class attributes:
+        BEFORE:
+          _sql_constraints = [
+              ('unique_code', 'UNIQUE(code)', 'Code must be unique!'),
+          ]
+        AFTER:
+          _unique_code = models.Constraint(
+              'UNIQUE(code)', 'Code must be unique!'
+          )
+    source: "Community: odoo.com forum (accepted answers 2025), cybrosys.com, codeerts.com"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: PYTHON_REGISTRY_IMPORT_PATH
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      'from odoo import registry' no longer works in Odoo 19.  The Registry
+      class must be imported from 'odoo.modules.registry' directly.
+      (Confirmed: cybrosys.com 2025, multiple migration blog posts, consistent
+       across 4+ independent sources.)
+    check_type: regex
+    pattern: "from\\s+odoo(?:\\.modules)?\\s+import\\s+(?:[\\w\\s,]*\\b)?registry\\b"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace:
+        from odoo import registry
+        from odoo.modules import registry
+      with:
+        from odoo.modules.registry import Registry
+    source: "Community: cybrosys.com, multiple Odoo 19 migration guides (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: python_api  --  Security / group field renames (COMMUNITY)
+  # ==========================================================================
+
+  - id: SECURITY_GROUPS_ID_RENAMED_PY
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      'res.users.groups_id' is renamed to 'res.users.group_ids' in Odoo 19.
+      Also: 'res.groups.users' is renamed to 'res.groups.user_ids'.
+      Python code referencing '.groups_id' on user records will raise FieldError.
+      The rename also cascades to ir.actions.act_window, ir.actions.server,
+      ir.actions.report, ir.ui.view, ir.ui.menu.
+      (Confirmed: odoo.com forum solved threads 2025, winotto.com, wcblog.in,
+       cybrosys.com — consistent across 5+ sources.)
+    check_type: regex
+    pattern: "\\.groups_id\\b"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace '.groups_id' with '.group_ids' on all res.users references.
+      Replace '.users' with '.user_ids' on res.groups references.
+      Also update any domain expressions filtering on 'groups_id'.
+    source: "Community: odoo.com forum (solved 2025), winotto.com, cybrosys.com, wcblog.in"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: SECURITY_GROUPS_USERS_RENAMED_PY
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      'res.groups.users' (the Many2many back-relation to res.users) is renamed
+      to 'res.groups.user_ids' in Odoo 19.  Code accessing 'group.users' will
+      raise AttributeError.
+      (Confirmed: winotto.com, odoo.com forum threads 2025.)
+    check_type: regex
+    pattern: "\\.users\\b"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace 'group.users' with 'group.user_ids' for res.groups records.
+      Note: this pattern may match unrelated code (e.g. res.users model
+      references), so the callable check type is preferred for precision.
+      Use context to verify the match is on a res.groups record.
+    source: "Community: winotto.com, odoo.com forum (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: SECURITY_REIFIED_GROUPS_REMOVED
+    category: python_api
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      The legacy reified group fields 'sel_groups_*' and 'in_group_*' on
+      res.users have been completely removed in Odoo 19.  Code referencing
+      these patterns raises AttributeError.
+      (Confirmed: cybrosys.com, winotto.com, wcblog.in — all 2025.)
+    check_type: regex
+    pattern: "\\b(sel_groups_|in_group_)\\w+"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Remove all 'sel_groups_*' / 'in_group_*' references.
+      Use 'user.has_group(xml_id)' or 'user.group_ids' membership checks.
+    source: "Community: cybrosys.com, winotto.com, wcblog.in (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: view_xml  (OFFICIAL + COMMUNITY evidence)
+  # ==========================================================================
+
+  - id: VIEW_ATTRS_REMOVED
+    category: view_xml
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      The 'attrs' XML attribute for conditional modifiers (invisible, readonly,
+      required) was removed in Odoo 17 and is absent in Odoo 19.  Fields,
+      groups, and buttons using attrs="{'invisible': [...]}" will fail view
+      validation at module install.
+    check_type: xpath
+    xpath_pattern: "//*[@attrs]"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Convert attrs= to direct inline Python boolean expressions:
+        BEFORE: <field name="x" attrs="{'invisible': [('state','=','draft')]}"/>
+        AFTER:  <field name="x" invisible="state == 'draft'"/>
+      Multiple modifiers on one element:
+        BEFORE: attrs="{'invisible': [('a','=',1)], 'readonly': [('b','=',True)]}"
+        AFTER:  invisible="a == 1" readonly="b == True"
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/user_interface/view_architectures.html"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: VIEW_STATES_REMOVED
+    category: view_xml
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      The 'states' shorthand attribute on fields and buttons (e.g.
+      states="draft,sent") was removed in Odoo 17+ and is not present in
+      Odoo 19.  Causes view validation errors at install.
+      (Confirmed: medium.com 2025, cybrosys.com, multiple odoo.com forum
+       threads with solved answers.)
+    check_type: xpath
+    xpath_pattern: "//*[@states]"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Replace states= with an invisible= expression:
+        BEFORE: <field name="x" states="done,cancel"/>
+        AFTER:  <field name="x" invisible="state not in ('done','cancel')"/>
+      Carefully verify logic direction for each instance.
+    source: "Community: medium.com (2025), cybrosys.com, odoo.com forum solved threads"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: VIEW_KANBAN_BOX_RENAMED
+    category: view_xml
+    severity: warning
+    evidence: COMMUNITY
+    description: >
+      Kanban view card templates using 't-name="kanban-box"' are deprecated in
+      Odoo 19.  The framework logs: "'kanban-box' is deprecated, define a
+      'card' template instead."  Kanban cards will likely render incorrectly
+      or not at all.
+      (Confirmed: GitHub issue comments, wcblog.in, cybrosys.com 2025,
+       reddit.com solved threads.)
+    check_type: xpath
+    xpath_pattern: "//t[@t-name='kanban-box']"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Rename the kanban card template:
+        BEFORE: <t t-name="kanban-box">...</t>
+        AFTER:  <t t-name="card">...</t>
+      Also remove any legacy 'kanban_color()' calls and use direct
+      color field references instead.
+    source: "Community: wcblog.in, cybrosys.com, github.com/odoo/odoo issue comments (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: VIEW_SEARCH_GROUP_ATTRS_REMOVED
+    category: view_xml
+    severity: warning
+    evidence: COMMUNITY
+    description: >
+      In search views, the 'expand', 'string', and 'name' attributes on
+      '<group>' tags are no longer supported in Odoo 19.  Their presence
+      causes "no context" / rendering errors at view load.
+      (Confirmed: dev.to, cybrosys.com, reddit.com/r/Odoo multiple solved
+       threads 2025.)
+    check_type: xpath
+    xpath_pattern: "//search//group[@expand or @string or @name]"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Simplify search view group tags:
+        BEFORE: <group expand="0" string="Group By" name="group_by">
+        AFTER:  <group>
+      If you need a default group-by, set 'default_group_by' on the list/tree
+      view element instead.
+    source: "Community: dev.to (2025), cybrosys.com, reddit.com/r/Odoo solved threads"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: security_xml  (COMMUNITY evidence)
+  # ==========================================================================
+
+  - id: SECURITY_GROUP_CATEGORY_ID_REPLACED
+    category: security_xml
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      In Odoo 19 a new 'res.groups.privilege' model was introduced as an
+      intermediate layer.  Security XML that defines res.groups records with a
+      'category_id' field pointing directly to ir.module.category will fail at
+      module install.  Groups must now reference 'privilege_id'.
+      (Confirmed: cybrosys.com, wcblog.in, winotto.com, multiple odoo.com
+       forum threads — all 2025.)
+    check_type: xpath
+    xpath_pattern: "//record[@model='res.groups']/field[@name='category_id']"
+    applies_to: "**/security/*.xml"
+    fix_hint: >
+      Create a res.groups.privilege record first:
+        <record id="privilege_my_module" model="res.groups.privilege">
+            <field name="name">My Module Access</field>
+            <field name="category_id" ref="base.module_category_..."/>
+        </record>
+      Then reference it from your group:
+        <record id="group_my_module_user" model="res.groups">
+            <field name="name">User</field>
+            <field name="privilege_id" ref="privilege_my_module"/>
+        </record>
+    source: "Community: cybrosys.com, wcblog.in, winotto.com, odoo.com forum (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: SECURITY_GROUPS_ID_XML_RENAMED
+    category: security_xml
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      XML records (ir.rule, ir.actions.act_window, ir.actions.server,
+      ir.actions.report, ir.ui.view, ir.ui.menu) that contain a field named
+      'groups_id' must use 'group_ids' in Odoo 19.
+      (Confirmed: odoo.com forum solved threads, cybrosys.com 2025 — consistent
+       across 5+ sources.)
+    check_type: xpath
+    xpath_pattern: "//field[@name='groups_id']"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Rename all <field name="groups_id"> to <field name="group_ids"> in your
+      XML data files (ir.rule, action, view, menu records).
+    source: "Community: odoo.com forum (solved 2025), cybrosys.com, winotto.com"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: controller  (OFFICIAL evidence)
+  # ==========================================================================
+
+  - id: CONTROLLER_JSON_TYPE_RENAMED
+    category: controller
+    severity: warning
+    evidence: OFFICIAL
+    description: >
+      In Odoo 18.1 (PR #183636, official ORM changelog), the HTTP route type
+      'json' was renamed to 'jsonrpc'.  Using type='json' in @http.route()
+      triggers DeprecationWarning in Odoo 19 and will be removed in a future
+      release.
+    check_type: regex
+    pattern: "type\\s*=\\s*['\"]json['\"]"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace:
+        @http.route('/path', type='json', auth='user')
+      with:
+        @http.route('/path', type='jsonrpc', auth='user')
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/backend/orm/changelog.html (18.1 section, PR #183636)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: scss  (COMMUNITY evidence)
+  # ==========================================================================
+
+  - id: SCSS_IMPORT_DEPRECATED
+    category: scss
+    severity: warning
+    evidence: COMMUNITY
+    description: >
+      Odoo 19 uses Dart Sass exclusively.  The '@import' directive is deprecated
+      in Dart Sass (scheduled for removal in Dart Sass 2.0) and causes
+      compilation warnings or failures in Odoo 19's asset pipeline.
+      (Confirmed: stackoverflow, medium.com, github.com issues with Dart Sass
+       in Odoo 19 context — 2025.)
+    check_type: regex
+    pattern: "^\\s*@import\\s+"
+    applies_to: "**/*.scss"
+    fix_hint: >
+      Replace @import with @use or @forward:
+        BEFORE: @import 'variables';
+        AFTER:  @use 'variables';            (access as variables.$var)
+             OR @use 'variables' as *;      (preserves global namespace)
+      For re-exporting to other partials, use @forward.
+    source: "Community: stackoverflow.com, medium.com Odoo 19 SCSS guides, Dart Sass upstream"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
+  # CATEGORY: qweb  (OFFICIAL + COMMUNITY)
+  # ==========================================================================
+
+  - id: QWEB_TCALL_ASSETS_FILTER_ATTRS
+    category: qweb
+    severity: warning
+    evidence: COMMUNITY
+    description: >
+      The 't-js' and 't-css' filter attributes on 't-call-assets' directives
+      are no longer supported.  Odoo 19 logs "Unknown directive or unused
+      attribute".  Asset filtering must be done at bundle-definition level.
+      (Confirmed: odoo.com forum threads, community reports — 2025.)
+    check_type: xpath
+    xpath_pattern: "//t[@t-call-assets and (@t-js or @t-css)]"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Remove t-js="false" or t-css="false" from t-call-assets tags.
+      Separate JS-only or CSS-only bundles must be defined in __manifest__.py
+      'assets' key and called independently.
+    source: "Community: odoo.com forum, cybrosys.com asset management guide (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: QWEB_INLINE_SCRIPT_FORBIDDEN
+    category: qweb
+    severity: blocking
+    evidence: OFFICIAL
+    description: >
+      Inline <script> tags inside QWeb templates are forbidden in Odoo 19 due
+      to enforced Content Security Policy (CSP) headers.  Modules using inline
+      <script> blocks in QWeb cause CSP violations and broken UI.
+    check_type: xpath
+    xpath_pattern: "//script[not(@t-call-assets)]"
+    applies_to: "**/templates/*.xml"
+    fix_hint: >
+      Move all JavaScript to static .js files and register them in the module
+      asset bundle via __manifest__.py:
+        'assets': {
+            'web.assets_backend': [
+                'my_module/static/src/js/my_file.js',
+            ],
+        }
+    source: "https://www.odoo.com/documentation/19.0/developer/reference/frontend/assets.html"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+
+# ==============================================================================
+# ACKNOWLEDGED_UNVERIFIED
+#
+# These items are known in the community but either:
+#   (a) actively disputed / no solved-issue confirmation, OR
+#   (b) confirmed only by a single source without corroboration, OR
+#   (c) tracked in open (not solved) GitHub issues.
+#
+# They are NOT rules and should NOT be used to block module installs without
+# further investigation.  Add them to rules only if confirmed.
+#
+# 1. EXACT LIST OF ~25-47 MERGED/REMOVED MODULES
+#    Community sources agree on a large number of module merges (one source
+#    says 25 merges, another says 47 removals).  The exact list is inconsistent
+#    across sources and no authoritative enumeration was found.
+#    ACTION: Run a diff of 'ir_module_module' between an Odoo 18 and Odoo 19
+#    baseline install to produce a definitive list.
+#
+# 2. EXACT LIST OF ~130 RENAMED MODELS / ~50 RENAMED FIELDS
+#    Magnitude confirmed by multiple sources; the individual names are not.
+#    ACTION: grep the OpenUpgrade 19.0 migration scripts at
+#    github.com/OCA/OpenUpgrade/tree/19.0 — those scripts contain the
+#    authoritative rename mapping.
+#
+# 3. OWL 2 -> 3 COMPONENT API BREAKING CHANGES (specific hooks/lifecycle)
+#    Community mentions an "OWL frontend refresh" in Odoo 19 but no specific
+#    hook removals or signature changes could be corroborated.  useState,
+#    useService, onMounted etc. appear unchanged per 2025 forum posts.
+#    STATUS: open question, not enough signal for a rule.
+#
+# 4. MINIMUM PYTHON VERSION (3.10 vs 3.12)
+#    Official docs say 3.10+; community strongly recommends 3.12.
+#    This is a server-environment concern, not detectable from module code.
+#    Document in README / DECISIONS.md rather than as a rule.
+#
+# 5. REPORT ENGINE CHANGES (wkhtmltopdf -> weasyprint or Gotenberg)
+#    No confirmed change found.  wkhtmltopdf appears to remain the default
+#    for PDF reports in Odoo 19.  STATUS: no action.
+#
+# 6. 'res.groups.privilege' PR NUMBER
+#    The security model refactor is confirmed across 5+ community sources and
+#    the pattern is consistent, but no specific merged PR link was found in the
+#    official odoo/odoo repo.  The rule SECURITY_GROUP_CATEGORY_ID_REPLACED is
+#    included as COMMUNITY evidence; treat it as requiring extra install-time
+#    test validation.
+#
+# 7. t-call-assets COMPLETE REMOVAL (vs. just filter attrs deprecated)
+#    Some sources say t-call-assets itself is removed; others say only the
+#    t-js/t-css filter attributes are deprecated.  The rule above takes the
+#    conservative position (filter attrs only).  If t-call-assets is fully
+#    removed, add a separate xpath rule for //t[@t-call-assets].
+#
+# 8. 'SCSS @import' STATUS (warning vs. hard failure)
+#    In some Odoo 19 setups @import causes only a warning; in others it causes
+#    a hard compilation failure.  Depends on Dart Sass version bundled.
+#    The rule is severity: warning for conservatism.  Upgrade to blocking if
+#    your environment confirms hard failures.
+# ==============================================================================
