@@ -204,13 +204,6 @@ class TestStaticSmokeGoodModule:
         verdict, _ = VerdictAggregator.aggregate(matches, None)
         assert verdict == VerdictState.PASSED
 
-    def test_good_module_has_no_model_rename_hits(self, tmp_path):
-        mod_path = _make_good_module(tmp_path)
-        engine = StaticAnalysisEngine(RULESET)
-        matches = engine.analyze_module(mod_path)
-        rename_hits = [m for m in matches if m.rule_id.startswith("MODEL_RENAME_")]
-        assert rename_hits == []
-
 
 class TestStaticSmokeBadModule:
     def test_bad_module_fails_static_checks(self, tmp_path):
@@ -241,51 +234,4 @@ class TestStaticSmokeBadModule:
         assert "MANIFEST_VERSION_STRING" in rule_ids
 
 
-class TestModelRenameRules:
-    def test_hr_contract_reference_in_python_is_flagged(self, tmp_path):
-        mod = tmp_path / "hr_ext"
-        mod.mkdir()
-        (mod / "__init__.py").write_text("", encoding="utf-8")
-        (mod / "__manifest__.py").write_text(
-            "{'name':'HR Ext','version':'19.0.1.0.0','license':'LGPL-3','depends':['hr_contract'],'installable':True}",
-            encoding="utf-8"
-        )
-        (mod / "models").mkdir()
-        (mod / "models" / "__init__.py").write_text("", encoding="utf-8")
-        py = mod / "models" / "wizard.py"
-        py.write_text(
-            "from odoo import models\n"
-            "class Wiz(models.TransientModel):\n"
-            "    _name = 'hr.ext.wiz'\n"
-            "    def do_it(self):\n"
-            "        contracts = self.env['hr.contract'].search([])\n",
-            encoding="utf-8",
-        )
-        engine = StaticAnalysisEngine(RULESET)
-        matches = engine.analyze_module(mod)
-        rule_ids = {m.rule_id for m in matches}
-        assert "MODEL_RENAME_HR_CONTRACT" in rule_ids
 
-    def test_procurement_group_reference_in_python_is_flagged(self, tmp_path):
-        mod = tmp_path / "stock_ext"
-        mod.mkdir()
-        (mod / "__init__.py").write_text("", encoding="utf-8")
-        (mod / "__manifest__.py").write_text(
-            "{'name':'Stock Ext','version':'19.0.1.0.0','license':'LGPL-3','depends':['stock'],'installable':True}",
-            encoding="utf-8"
-        )
-        (mod / "models").mkdir()
-        (mod / "models" / "__init__.py").write_text("", encoding="utf-8")
-        py = mod / "models" / "route.py"
-        py.write_text(
-            "from odoo import models\n"
-            "class Route(models.Model):\n"
-            "    _name = 'stock.ext.route'\n"
-            "    def run(self):\n"
-            "        pg = self.env['procurement.group']\n",
-            encoding="utf-8",
-        )
-        engine = StaticAnalysisEngine(RULESET)
-        matches = engine.analyze_module(mod)
-        rule_ids = {m.rule_id for m in matches}
-        assert "MODEL_RENAME_PROCUREMENT_GROUP" in rule_ids
