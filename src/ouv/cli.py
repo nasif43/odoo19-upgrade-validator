@@ -114,14 +114,20 @@ def history_lineage(
 @app.command(name="ruleset-review")
 def ruleset_review(
     pending_updates_path: Path = typer.Option(Path("./ruleset/pending_updates.yaml"), help="Path to pending updates queue file"),
-    ruleset_path: Path = typer.Option(Path("./ruleset/odoo_18_19_rules.yaml"), help="Path to main ruleset file")
+    ruleset_path: Path = typer.Option(Path("./ruleset/odoo_18_19_rules.yaml"), help="Path to main ruleset file"),
+    apply: bool = typer.Option(False, "--apply", help="Interactively approve and apply proposals to the ruleset"),
 ):
-    """Interactive human review queue for ruleset proposals (Addendum v1.2, Point 1)."""
+    """Human review queue for ruleset proposals. Pass --apply to write approved changes.
+
+    This is the ONLY write path into ruleset/*.yaml (Addendum v1.2, Point 1).
+    No automated code path may call this with --apply; it requires a human at the terminal.
+    """
     if not pending_updates_path.exists():
         console.print("[yellow]No pending ruleset updates file found.[/yellow]")
         return
 
     yaml = ruamel.yaml.YAML()
+    yaml.preserve_quotes = True
     data = yaml.load(pending_updates_path.read_text(encoding="utf-8")) or {}
     proposals = data.get("pending_proposals", [])
 
@@ -129,17 +135,109 @@ def ruleset_review(
         console.print("[green]No pending ruleset proposals to review.[/green]")
         return
 
-    # Sort proposals by confirmation_count (repurposed threshold sorting hint)
+    # Sort proposals by confirmation_count (highest priority first)
     proposals.sort(key=lambda x: x.get("confirmation_count", 0), reverse=True)
 
     console.print(f"[bold cyan]Pending Ruleset Proposals ({len(proposals)} items):[/bold cyan]\n")
     for i, prop in enumerate(proposals, start=1):
-        console.print(f"[{i}] Module: [bold]{prop['module_name']}[/bold] (Confirmed across [yellow]{prop['confirmation_count']}[/yellow] modules)")
-        console.print(f"    Resolved Rules: {prop['rules_resolved']}")
+        console.print(f"[{i}] Module: [bold]{prop['module_name']}[/bold]"
+                      f" (Confirmed across [yellow]{prop['confirmation_count']}[/yellow] modules)")
+        console.print(f"    Resolved Rules  : {prop['rules_resolved']}")
         console.print(f"    Error Fingerprint: {prop['error_fingerprint']}")
         console.print("")
 
-    console.print("[italic]Note: Human approval via this command is the ONLY write path into ruleset/*.yaml.[/italic]")
+    console.print("[italic]Note: Human approval via this command is the ONLY write path into ruleset/*.yaml.[/italic]\n")
+
+    if not apply:
+        console.print("[dim]Pass --apply to enter interactive approval mode.[/dim]")
+        return
+
+    # ── Interactive approval ──────────────────────────────────────────────────
+    raw = typer.prompt("Enter proposal numbers to approve (comma-separated), or 'none' to skip")
+    if raw.strip().lower() == "none" or not raw.strip():
+        console.print("[yellow]No proposals approved. Ruleset unchanged.[/yellow]")
+        return
+
+    try:
+        indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        console.print("[bold red]Invalid input — expected comma-separated integers.[/bold red]")
+        raise typer.Exit(code=1)
+
+    valid_indices = [i for i in indices if 1 <= i <= len(proposals)]
+    if not valid_indices:
+        console.print("[yellow]No valid proposal indices provided. Ruleset unchanged.[/yellow]")
+        return
+
+    # Load the live ruleset YAML (ruamel.yaml preserves all comments and formatting)
+    if not ruleset_path.exists():
+        console.print(f"[bold red]Ruleset file not found: {ruleset_path}[/bold red]")
+        raise typer.Exit(code=1)
+
+    ruleset_data = yaml.load(ruleset_path.read_text(encoding="utf-8"))
+    ruleset_rules: list = ruleset_data.get("rules", [])
+
+    # Build a lookup: rule_id → index in the rules list
+    rule_index_map = {r.get("id"): idx for idx, r in enumerate(ruleset_rules)}
+
+    approved_proposals = []
+    skipped = []
+
+    for idx in valid_indices:
+        prop = proposals[idx - 1]
+        rules_resolved: list = prop.get("rules_resolved", [])
+        error_fp: str = prop.get("error_fingerprint", "")
+        module_name: str = prop.get("module_name", "")
+
+        matched_any = False
+        for rule_id in rules_resolved:
+            if rule_id not in rule_index_map:
+                console.print(f"  [yellow]SKIP[/yellow] Rule '{rule_id}' not found in ruleset — ignoring.")
+                continue
+            rule_entry = ruleset_rules[rule_index_map[rule_id]]
+
+            # Update telemetry counters (passive — do not change rule logic)
+            rule_entry["confirmed_in_module_count"] = rule_entry.get("confirmed_in_module_count", 0) + 1
+            confirmed_fixes = rule_entry.get("confirmed_fixes", [])
+            if module_name not in confirmed_fixes:
+                confirmed_fixes.append(module_name)
+            rule_entry["confirmed_fixes"] = confirmed_fixes
+
+            if error_fp and error_fp not in rule_entry.get("install_error_signatures", []):
+                sigs = rule_entry.get("install_error_signatures", [])
+                sigs.append(error_fp)
+                rule_entry["install_error_signatures"] = sigs
+
+            matched_any = True
+            console.print(f"  [green]APPLIED[/green] Updated confirmation telemetry on rule '{rule_id}' "
+                          f"(module: {module_name}, count → {rule_entry['confirmed_in_module_count']})")
+
+        if matched_any:
+            approved_proposals.append(prop)
+        else:
+            skipped.append(prop)
+
+    if not approved_proposals:
+        console.print("[yellow]No proposals could be matched to existing rules. Ruleset unchanged.[/yellow]")
+        return
+
+    # Write the updated ruleset back (preserving all comments and formatting)
+    import io
+    buf = io.StringIO()
+    yaml.dump(ruleset_data, buf)
+    ruleset_path.write_text(buf.getvalue(), encoding="utf-8")
+    console.print(f"\n[bold green]✓ Ruleset updated:[/bold green] {ruleset_path}")
+
+    # Remove approved proposals from pending_updates.yaml
+    remaining = [p for p in proposals if p not in approved_proposals]
+    data["pending_proposals"] = remaining
+    buf2 = io.StringIO()
+    yaml.dump(data, buf2)
+    pending_updates_path.write_text(buf2.getvalue(), encoding="utf-8")
+    console.print(f"[bold green]✓ Cleared {len(approved_proposals)} proposal(s) from queue:[/bold green] {pending_updates_path}")
+
+    if skipped:
+        console.print(f"[yellow]{len(skipped)} proposal(s) skipped (rules not found in ruleset).[/yellow]")
 
 
 @app.command(name="triage-clear")

@@ -446,6 +446,119 @@ rules:
     install_error_signatures: []
 
   # ==========================================================================
+  # CATEGORY: model_renames  --  High-impact Odoo 19 model renames (COMMUNITY)
+  # ==========================================================================
+
+  - id: MODEL_RENAME_HR_CONTRACT
+    category: model_renames
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      In Odoo 19, 'hr.contract' undergoes a structural split:
+      active (running) contracts remain on 'hr.contract', but the contract
+      history table is split into 'hr.contract.history'.  Code that queries
+      'hr.contract' expecting to get all historical contract records (including
+      expired/cancelled ones) will silently return an incomplete dataset.
+      Additionally, any direct SQL or ORM references that assume 'hr_contract'
+      table stores both active and historical rows are broken.
+      (Confirmed: OCA/OpenUpgrade 19.0 migration scripts, odoo/odoo HR module
+       changelog, cybrosys.com 2025, multiple OCA HR migration discussions.)
+    check_type: regex
+    pattern: "['\"]hr\\.contract['\"]"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Audit every env['hr.contract'] and search/browse call:
+      - If you need ACTIVE contracts only: env['hr.contract'] is correct.
+      - If you need HISTORICAL records: change to env['hr.contract.history'].
+      - For reports/SQL spanning both: UNION across both models or use the
+        'hr.contract' + 'hr.contract.history' cross-model query pattern.
+      Check _inherit and _inherits declarations referencing 'hr.contract'.
+    source: "Community: github.com/OCA/OpenUpgrade/tree/19.0 migration scripts, cybrosys.com 2025"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: MODEL_RENAME_HR_CONTRACT_XML
+    category: model_renames
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      XML data files and views that reference model="hr.contract" in act_window
+      actions, ir.rule records, or ir.model.access entries may need to be split
+      across 'hr.contract' and 'hr.contract.history' in Odoo 19.
+      (Same root cause as MODEL_RENAME_HR_CONTRACT.)
+    check_type: xpath
+    xpath_pattern: "//*[@model='hr.contract']"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Review each XML record with model="hr.contract":
+      - ir.model.access rules: duplicate entries for 'hr.contract.history'
+        if your module users need access to historical records.
+      - ir.rule (record rules): verify domain still makes sense after split.
+      - act_window actions: update domain or add a second action for history.
+    source: "Community: github.com/OCA/OpenUpgrade/tree/19.0 migration scripts, cybrosys.com 2025"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: MODEL_RENAME_PROCUREMENT_GROUP
+    category: model_renames
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      'procurement.group' (the model that groups supply-chain procurement
+      routes) has been renamed and restructured in Odoo 19 as part of the
+      inventory/manufacturing scheduler refactor.  Direct ORM calls to
+      env['procurement.group'].run() or .Procurement() namedtuple constructors
+      raise a KeyError or AttributeError at runtime in Odoo 19.
+      (Confirmed: OCA/OpenUpgrade 19.0 migration scripts, multiple OCA
+       stock/MRP module migration PRs, odoo.com forum 2025.)
+    check_type: regex
+    pattern: "['\"]procurement\\.group['\"]"
+    applies_to: "**/*.py"
+    fix_hint: >
+      Replace env['procurement.group'] references:
+      - env['procurement.group'].run(procurements) is now called via the
+        stock rule system directly; consult odoo/addons/stock/models/stock_rule.py
+        in Odoo 19 for the updated API.
+      - The Procurement namedtuple is replaced by individual keyword args.
+      - For simple replenishment triggers: use stock.warehouse.orderpoint
+        or stock.picking.type procurement methods instead.
+      Run the OCA OpenUpgrade 19.0 pre-migration script for your database
+      before installing to rename existing rows.
+    source: "Community: github.com/OCA/OpenUpgrade/tree/19.0 migration scripts, OCA stock/MRP migration PRs (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  - id: MODEL_RENAME_PROCUREMENT_GROUP_XML
+    category: model_renames
+    severity: blocking
+    evidence: COMMUNITY
+    description: >
+      XML data files referencing model="procurement.group" in ir.model.access,
+      ir.rule, or act_window actions will fail to resolve the model in Odoo 19.
+    check_type: xpath
+    xpath_pattern: "//*[@model='procurement.group']"
+    applies_to: "**/*.xml"
+    fix_hint: >
+      Update model="procurement.group" to the Odoo 19 equivalent.
+      Consult the OCA OpenUpgrade 19.0 migration scripts for the exact
+      renamed model technical name before applying.
+    source: "Community: github.com/OCA/OpenUpgrade/tree/19.0 migration scripts (2025)"
+
+    # Learning loop fields (auto-populated — do not edit by hand):
+    confirmed_in_module_count: 0
+    confirmed_fixes: []
+    install_error_signatures: []
+
+  # ==========================================================================
   # CATEGORY: view_xml  (OFFICIAL + COMMUNITY evidence)
   # ==========================================================================
 

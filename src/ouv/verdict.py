@@ -35,6 +35,11 @@ class VerdictAggregator:
 
         if install_result.exit_code == 0:
             return VerdictState.PASSED, None
+        elif install_result.exit_code == -3:
+            # odoo-bin exited 0 but ERROR/CRITICAL lines were present in log output.
+            # This is a module-level failure (view validation, missing field, etc.), not
+            # an infrastructure error, so it maps to FAILED rather than ERRORED.
+            return VerdictState.FAILED, f"Dynamic install: ERROR entries in log despite exit 0 ({install_result.install_error_sig})"
         elif install_result.exit_code in (-1, -2):
             return VerdictState.ERRORED, f"Infrastructure/Execution error (exit code: {install_result.exit_code})"
         else:
